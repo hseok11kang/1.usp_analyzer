@@ -35,15 +35,26 @@ def set_korean_font():
         ("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc", "Noto Sans CJK KR"),
         ("./fonts/NanumGothic.ttf", "NanumGothic"),
     ]
+    selected = None
     for path, name in candidates:
         if os.path.exists(path):
             try:
                 font_manager.fontManager.addfont(path)
             except Exception:
                 pass
-            matplotlib.rc("font", family=name)
+            selected = name
             break
-    plt.rcParams["axes.unicode_minus"] = False
+    # 폴백: 선택 실패 시에도 sans-serif에 한글 가능한 폰트 리스트 지정
+    if selected:
+        matplotlib.rcParams["font.family"] = selected
+    matplotlib.rcParams["font.sans-serif"] = [
+        selected or "Malgun Gothic",
+        "AppleGothic",
+        "Noto Sans CJK KR",
+        "NanumGothic",
+        "DejaVu Sans",
+    ]
+    matplotlib.rcParams["axes.unicode_minus"] = False
 
 set_korean_font()
 
@@ -371,13 +382,19 @@ def radar_init(fig_size=(6.5,6.5), rmax=10):
 st.set_page_config(page_title="Product USP Analyzer", page_icon="⚡")
 st.title("⚡ Product USP Analyzer")
 
-with st.sidebar:
-    model = st.selectbox("모델", ["gemini-2.5-flash", "gemini-2.5-flash-lite"], index=0)
-    thinking_off = st.checkbox("Thinking 끄기(예산 0)", value=True)
-    st.caption("두 PDP URL을 입력하면 자사/경쟁 제품을 비교합니다.")
+# (요청) 사이드바 제거 + 고정값 사용
+model = "gemini-2.5-flash"
+thinking_off = True
 
-url_ours = st.text_input("자사 제품의 **공식 PDP URL**을 입력해주세요")
-url_theirs = st.text_input("경쟁 제품의 **공식 PDP URL**을 입력해주세요")
+# (요청) 텍스트 입력 기본값 설정
+url_ours = st.text_input(
+    "자사 제품의 **공식 PDP URL**을 입력해주세요",
+    value="https://www.apple.com/kr/airpods-pro/",
+)
+url_theirs = st.text_input(
+    "경쟁 제품의 **공식 PDP URL**을 입력해주세요",
+    value="https://www.samsung.com/sec/buds/galaxy-buds3/buy/?modelCode=SM-R630NZAAKOO",
+)
 
 if st.button("두 제품 비교하기"):
     if not url_ours or not url_theirs:
@@ -481,6 +498,7 @@ if st.button("두 제품 비교하기"):
             r["ours"] = enrich_price(r.get("ours",""), price_hints_ours)
             r["theirs"] = enrich_price(r.get("theirs",""), price_hints_theirs)
 
+    meta = data.get("meta", {}) or {}
     if meta:
         meta_lines = []
         if any(meta.get(k) for k in ["brand_ours","product_name_ours","product_code_ours"]):
