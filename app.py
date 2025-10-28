@@ -44,7 +44,6 @@ def set_korean_font():
                 pass
             selected = name
             break
-    # 폴백: 선택 실패 시에도 sans-serif에 한글 가능한 폰트 리스트 지정
     if selected:
         matplotlib.rcParams["font.family"] = selected
     matplotlib.rcParams["font.sans-serif"] = [
@@ -59,6 +58,7 @@ def set_korean_font():
 set_korean_font()
 
 import numpy as np
+import unicodedata  # <<< (추가) ASCII 강제용
 
 # ===============================
 # Gemini SDK
@@ -346,6 +346,7 @@ RADAR_INSTRUCTIONS = """
 - 각 축은 서로 독립적. 예: '스마트/콘텐츠 생태계', '이동성/배터리', '화질/해상도', '오디오', '가격 경쟁력' 등.
 - 자사/경쟁 각각 0~10 점수로 정규화하여 배열로 반환(축 순서와 동일).
 - 각 축에 대한 한 줄 근거를 'rationales' 배열로 제공(축 순서와 동일).
+- **축 이름(axes)은 반드시 영어(ASCII)만 사용**. 비ASCII 금지.
 - JSON만 반환.
 필드: axes[], ours_scores[], theirs_scores[], ours_label, theirs_label, rationales[], insights[].
 주의: 허구 금지. 근거 불충분 시 “(추정)”을 명시.
@@ -375,6 +376,14 @@ def radar_init(fig_size=(6.5,6.5), rmax=10):
     fig, ax = plt.subplots(figsize=fig_size, subplot_kw=dict(polar=True))
     ax.set_ylim(0, rmax)
     return fig, ax
+
+# —— (추가) ASCII만 남기고 비ASCII 제거 + 폴백 ——
+def to_ascii_label(s: str, idx: int) -> str:
+    try:
+        ascii_s = unicodedata.normalize("NFKD", s or "").encode("ascii", "ignore").decode("ascii").strip()
+        return ascii_s if ascii_s else f"Axis {idx+1}"
+    except Exception:
+        return f"Axis {idx+1}"
 
 # ===============================
 # 7) UI
@@ -429,7 +438,7 @@ if st.button("두 제품 비교하기"):
     # 메타
     meta = data.get("meta", {}) or {}
 
-    # ===== (요청 5,6) 포지셔닝 맵을 최상단에 표기 + 타이틀 변경 =====
+    # ===== 포지셔닝 맵 (영문 표기 강제) =====
     st.subheader("🧭 자사 vs. 경쟁 제품 포지셔닝 맵")
     with st.spinner("축 선정 및 점수화 중…"):
         radar_schema = get_radar_schema()
@@ -446,30 +455,34 @@ if st.button("두 제품 비교하기"):
             axes_labels = radar_json.get("axes") or []
             ours_scores = radar_json.get("ours_scores") or []
             theirs_scores = radar_json.get("theirs_scores") or []
-            ours_label = radar_json.get("ours_label") or "자사"
-            theirs_label = radar_json.get("theirs_label") or "경쟁"
+            # 범례는 영문 고정
+            ours_label = "Ours"
+            theirs_label = "Theirs"
 
             n = min(len(axes_labels), len(ours_scores), len(theirs_scores))
             axes_labels = axes_labels[:n]
             ours_scores = [float(x) for x in ours_scores[:n]]
             theirs_scores = [float(x) for x in theirs_scores[:n]]
 
+            # 축 라벨을 ASCII로 강제 변환 + 폴백
+            axes_labels_en = [to_ascii_label(lbl, i) for i, lbl in enumerate(axes_labels)]
+
             fig, ax = radar_init(rmax=10)
             angles = np.linspace(0, 2*np.pi, n, endpoint=False).tolist()
-            ax.set_thetagrids(np.degrees(angles), labels=axes_labels)
+            ax.set_thetagrids(np.degrees(angles), labels=axes_labels_en)
             ax.set_rgrids([0,2,4,6,8,10], angle=0)
-            plot_radar(ax, axes_labels, ours_scores, label=ours_label)
-            plot_radar(ax, axes_labels, theirs_scores, label=theirs_label)
+            plot_radar(ax, axes_labels_en, ours_scores, label=ours_label)
+            plot_radar(ax, axes_labels_en, theirs_scores, label=theirs_label)
             ax.legend(loc="upper right", bbox_to_anchor=(1.25, 1.1))
             st.pyplot(fig)
 
-            # (요청 1,2,3,4) 근거 섹션: 명칭 변경, 축명 대괄호 표시, 회색·소폰트, 해석 제거
+            # 근거 섹션(원문은 한글일 수 있으나, 맵 내부 텍스트만 영문화 요구라서 근거는 그대로 둠)
             ration = radar_json.get("rationales") or []
             if ration and n:
                 st.markdown(PILL_CSS, unsafe_allow_html=True)
                 st.markdown("**제품 경쟁력 평가 근거**")
                 for i, r in enumerate(ration[:n], 1):
-                    axis_tag = axes_labels[i-1] if i-1 < len(axes_labels) else "Feature"
+                    axis_tag = axes_labels_en[i-1] if i-1 < len(axes_labels_en) else "Feature"
                     st.markdown(
                         f"<div class='small-gray'>- {i}. [{axis_tag}] {r}</div>",
                         unsafe_allow_html=True
